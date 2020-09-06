@@ -21,6 +21,8 @@ find_package(OpenCV REQUIRED)
 
 find_package(Ceres REQUIRED)
 
+include_directories(thirdparty/Sophus)
+
 include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS})
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
@@ -41,6 +43,7 @@ add_executable(vins_estimator
     src/factor/projection_factor.cpp
     src/factor/projection_td_factor.cpp
     src/factor/marginalization_factor.cpp
+    src/factor/SE3AbsolutatePoseFactor.cpp
     src/utility/utility.cpp
     src/utility/visualization.cpp
     src/utility/CameraPoseVisualization.cpp

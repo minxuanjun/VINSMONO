@@ -23,4 +23,7 @@ extern int EQUALIZE;
 extern int FISHEYE;
 extern bool PUB_THIS_FRAME;
 
+extern cv::Vec4d cam_intrinsics;
+extern cv::Vec4d cam_distortion_coeffs;
+
 void readParameters(ros::NodeHandle &n);

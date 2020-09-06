@@ -25,6 +25,7 @@ void Estimator::setParameter() {
 }
 
 void Estimator::clearState() {
+  b_first_marginzation_old = false;
   local_active_frames.clear();
   int_frameid2_time_frameid.clear();
   time_frameid2_int_frameid.clear();
@@ -534,6 +535,7 @@ void Estimator::vector2double() {
 }
 
 void Estimator::double2vector() {
+#if 0
   Vector3d origin_R0 = Utility::R2ypr(Rs[0]);
   Vector3d origin_P0 = Ps[0];
 
@@ -554,21 +556,21 @@ void Estimator::double2vector() {
     ROS_DEBUG("euler singular point!");
     rot_diff = Rs[0] * Quaterniond(para_Pose[0][6], para_Pose[0][3],
                                    para_Pose[0][4], para_Pose[0][5])
-                           .toRotationMatrix()
-                           .transpose();
+        .toRotationMatrix()
+        .transpose();
   }
 
   for (int i = 0; i <= WINDOW_SIZE; i++) {
 
     Rs[i] = rot_diff * Quaterniond(para_Pose[i][6], para_Pose[i][3],
                                    para_Pose[i][4], para_Pose[i][5])
-                           .normalized()
-                           .toRotationMatrix();
+        .normalized()
+        .toRotationMatrix();
 
     Ps[i] = rot_diff * Vector3d(para_Pose[i][0] - para_Pose[0][0],
                                 para_Pose[i][1] - para_Pose[0][1],
                                 para_Pose[i][2] - para_Pose[0][2]) +
-            origin_P0;
+        origin_P0;
 
     Vs[i] = rot_diff * Vector3d(para_SpeedBias[i][0], para_SpeedBias[i][1],
                                 para_SpeedBias[i][2]);
@@ -585,9 +587,67 @@ void Estimator::double2vector() {
         Vector3d(para_Ex_Pose[i][0], para_Ex_Pose[i][1], para_Ex_Pose[i][2]);
     ric[i] = Quaterniond(para_Ex_Pose[i][6], para_Ex_Pose[i][3],
                          para_Ex_Pose[i][4], para_Ex_Pose[i][5])
-                 .toRotationMatrix();
+        .toRotationMatrix();
+  }
+#else
+
+  Vector3d origin_R0 = Utility::R2ypr(Rs[0]);
+  Vector3d origin_P0 = Ps[0];
+
+  if (failure_occur) {
+    origin_R0 = Utility::R2ypr(last_R0);
+    origin_P0 = last_P0;
+    failure_occur = 0;
+  }
+  Vector3d origin_R00 =
+      Utility::R2ypr(Quaterniond(para_Pose[0][6], para_Pose[0][3],
+                                 para_Pose[0][4], para_Pose[0][5])
+                         .toRotationMatrix());
+  double y_diff = origin_R0.x() - origin_R00.x();
+  // TODO
+
+  Matrix3d rot_diff = Utility::ypr2R(Vector3d(y_diff, 0, 0));
+  if (abs(abs(origin_R0.y()) - 90) < 1.0 ||
+      abs(abs(origin_R00.y()) - 90) < 1.0) {
+    ROS_DEBUG("euler singular point!");
+    rot_diff = Rs[0] * Quaterniond(para_Pose[0][6], para_Pose[0][3],
+                                   para_Pose[0][4], para_Pose[0][5])
+                           .toRotationMatrix()
+                           .transpose();
   }
 
+  if (last_marginalization_info) {
+    rot_diff = Eigen::Matrix3d::Identity();
+    origin_P0 = Eigen::Vector3d::Zero();
+  }
+
+  for (int i = 0; i <= WINDOW_SIZE; i++) {
+
+    Rs[i] = Quaterniond(para_Pose[i][6], para_Pose[i][3], para_Pose[i][4],
+                        para_Pose[i][5])
+                .normalized()
+                .toRotationMatrix();
+
+    Ps[i] = Vector3d(para_Pose[i][0], para_Pose[i][1], para_Pose[i][2]);
+
+    Vs[i] = Vector3d(para_SpeedBias[i][0], para_SpeedBias[i][1],
+                     para_SpeedBias[i][2]);
+
+    Bas[i] = Vector3d(para_SpeedBias[i][3], para_SpeedBias[i][4],
+                      para_SpeedBias[i][5]);
+
+    Bgs[i] = Vector3d(para_SpeedBias[i][6], para_SpeedBias[i][7],
+                      para_SpeedBias[i][8]);
+  }
+
+  for (int i = 0; i < NUM_OF_CAM; i++) {
+    tic[i] =
+        Vector3d(para_Ex_Pose[i][0], para_Ex_Pose[i][1], para_Ex_Pose[i][2]);
+    ric[i] = Quaterniond(para_Ex_Pose[i][6], para_Ex_Pose[i][3],
+                         para_Ex_Pose[i][4], para_Ex_Pose[i][5])
+                 .toRotationMatrix();
+  }
+#endif
   // TODO: 3D 点更新
   // ------------------
   f_manager.invDepth2Depth();
@@ -633,6 +693,19 @@ void Estimator::updateFramePose() {
       localWindowFrames[timestamp].Twi.rot = Rs[i];
       localWindowFrames[timestamp].Twi.pos = Ps[i];
     }
+
+    if (local_map_poses.find(timestamp) != local_map_poses.end()) {
+      local_map_poses.at(timestamp).rot = Rs[i];
+      local_map_poses.at(timestamp).pos = Ps[i];
+    } else {
+      local_map_poses[timestamp].rot = Rs[i];
+      local_map_poses[timestamp].pos = Ps[i];
+    }
+  }
+
+  if (!local_map_poses.empty() &&
+      (local_map_poses.rbegin()->first - local_map_poses.begin()->first) > 10) {
+    local_map_poses.erase(local_map_poses.begin());
   }
 }
 
@@ -707,6 +780,22 @@ void Estimator::optimization() {
   TicToc t_whole, t_prepare;
   vector2double();
 
+  if (!b_first_marginzation_old) {
+    Transformd T_w_i_0(Rs[0], Ps[0]);
+    T_w_i_0.rot.normalized();
+    T_w_origin = T_w_i_0;
+    Eigen::Mat66d information;
+    information.setZero();
+    information.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 1e8;
+    information.block<3, 3>(3, 3) =
+        Eigen::Matrix3d::Identity() * (0.25 * 1e4);
+    information.block<3, 3>(3, 3) =
+        Eigen::Matrix3d::Identity() * (0.5 * 1e4);
+
+    SE3AbsolutatePoseFactor *first_pose_prior_factor =
+        new SE3AbsolutatePoseFactor(T_w_i_0, information);
+    problem.AddResidualBlock(first_pose_prior_factor, NULL, para_Pose[0]);
+  }
   if (last_marginalization_info) {
     // construct new marginlization_factor
     MarginalizationFactor *marginalization_factor =
@@ -733,6 +822,11 @@ void Estimator::optimization() {
     if (!(landmark.second.used_num >= 2 &&
           time_frameid2_int_frameid.at(landmark.second.kf_id) <
               WINDOW_SIZE - 2))
+      continue;
+
+    if (landmark.second.solve_flag ==
+            KeyPointLandmark::SolveFlag::NOT_TRIANGULATE ||
+        landmark.second.solve_flag == KeyPointLandmark::SolveFlag::SOLVE_FAIL)
       continue;
 
     auto host_tid = landmark.second.kf_id; // 第一个观测值对应的就是主导真
@@ -792,7 +886,7 @@ void Estimator::optimization() {
         // 确定landmark是否合法
         landmark.used_num = landmark.obs.size();
         if (!(landmark.used_num >= 2 and
-            time_frameid2_int_frameid.at(landmark.kf_id) < WINDOW_SIZE - 2)) {
+              time_frameid2_int_frameid.at(landmark.kf_id) < WINDOW_SIZE - 2)) {
           continue;
         }
 
@@ -825,10 +919,15 @@ void Estimator::optimization() {
   // options.use_explicit_schur_complement = true;
   // options.minimizer_progress_to_stdout = true;
   // options.use_nonmonotonic_steps = true;
+
   if (marginalization_flag == MarginalizationFlag::MARGIN_OLD)
     options.max_solver_time_in_seconds = SOLVER_TIME * 4.0 / 5.0;
   else
     options.max_solver_time_in_seconds = SOLVER_TIME;
+  if (local_map_poses.size() < 20) {
+    options.max_solver_time_in_seconds *= 2;
+    options.max_num_iterations *= 2;
+  }
   TicToc t_solver;
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
@@ -838,10 +937,29 @@ void Estimator::optimization() {
 
   double2vector();
 
+  // TODO: 剔除不合法的观测
+
   TicToc t_whole_marginalization;
   if (marginalization_flag == MarginalizationFlag::MARGIN_OLD) {
     MarginalizationInfo *marginalization_info = new MarginalizationInfo();
     vector2double();
+
+
+    if (!b_first_marginzation_old) {
+      Transformd T_w_i_0(Rs[0], Ps[0]);
+      T_w_i_0.rot.normalized();
+      Eigen::Mat66d information;
+      information.setZero();
+      information.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 1e8;
+      information.block<3, 3>(3, 3) =
+          Eigen::Matrix3d::Identity() * (0.1 * 1e4);
+      information.block<3, 3>(3, 3) =
+          Eigen::Matrix3d::Identity() * (1e4 * 0.25);
+
+      SE3AbsolutatePoseFactor *first_pose_prior_factor =
+          new SE3AbsolutatePoseFactor(T_w_origin, information);
+      problem.AddResidualBlock(first_pose_prior_factor, NULL, para_Pose[0]);
+    }
 
     if (last_marginalization_info) {
       vector<int> drop_set;
@@ -881,6 +999,12 @@ void Estimator::optimization() {
         if (!(landmark.second.used_num >= 2 &&
               time_frameid2_int_frameid.at(landmark.second.kf_id) <
                   WINDOW_SIZE - 2))
+          continue;
+
+        if (landmark.second.solve_flag ==
+                KeyPointLandmark::SolveFlag::NOT_TRIANGULATE ||
+            landmark.second.solve_flag ==
+                KeyPointLandmark::SolveFlag::SOLVE_FAIL)
           continue;
 
         auto host_tid = landmark.second.kf_id;
@@ -957,6 +1081,10 @@ void Estimator::optimization() {
     last_marginalization_info = marginalization_info;
     last_marginalization_parameter_blocks = parameter_blocks;
 
+    if(!b_first_marginzation_old)
+    {
+      b_first_marginzation_old = true;
+    }
   } else {
     if (last_marginalization_info &&
         std::count(std::begin(last_marginalization_parameter_blocks),
@@ -1142,8 +1270,8 @@ void Estimator::slideWindowOld() {
 }
 
 void Estimator::setReloFrame(double _frame_stamp, int _frame_index,
-                             Eigen::aligned_vector<Vector3d> &_match_points, Vector3d _relo_t,
-                             Matrix3d _relo_r) {
+                             Eigen::aligned_vector<Vector3d> &_match_points,
+                             Vector3d _relo_t, Matrix3d _relo_r) {
   relo_frame_stamp = _frame_stamp;
   relo_frame_index = _frame_index;
   match_points.clear();

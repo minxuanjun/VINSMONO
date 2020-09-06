@@ -40,7 +40,8 @@ public:
 
 class KeyPointLandmark {
 public:
-  enum class SolveFlag { NOT_SOLVE, SOLVE_SUCC, SOLVE_FAIL };
+  enum class SolveFlag {
+    NOT_TRIANGULATE, TRIANGULATE_SUCESS,SOLVE_SUCC, SOLVE_FAIL };
 
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
@@ -49,7 +50,7 @@ public:
   KeyPointLandmark(vins::FeatureID _feature_id, vins::TimeFrameId _start_frame)
       : feature_id(_feature_id), kf_id(_start_frame),
         start_frame(_start_frame), // TODO, start_frame 需要去掉
-        used_num(0), estimated_depth(-1.0), solve_flag(SolveFlag::NOT_SOLVE) {}
+        used_num(0), estimated_depth(-1.0), solve_flag(SolveFlag::NOT_TRIANGULATE) {}
 
   int endFrame();
 
@@ -58,16 +59,19 @@ public:
   vins::TimeFrameId kf_id; // host frame id
   int start_frame;         // 这个需要去掉
   int used_num;
-  bool is_outlier;
-  bool is_margin;
+  bool is_outlier{};
+  bool is_margin{};
   double estimated_depth;
-  SolveFlag solve_flag; // 0 haven't solve yet; 1 solve succ; 2 solve fail;
+  SolveFlag solve_flag = SolveFlag::NOT_TRIANGULATE; // 0 haven't solve yet; 1 solve succ; 2 solve fail;
 
   // TODO: 观测值
   Eigen::aligned_map<vins::TimeFrameId, KeypointObservation> obs;
 
+  // TODO:　增加新的观测值, 每个特征点的观测值可以大于滑窗的帧数
+  Eigen::aligned_map<vins::TimeFrameId, KeypointObservation> localmap_obs;
+
   //　backend parameter interface
-  std::array<double, SIZE_FEATURE> data;
+  std::array<double, SIZE_FEATURE> data{};
 
   vector<KeypointObservation> feature_per_frame;
 

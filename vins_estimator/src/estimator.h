@@ -17,6 +17,7 @@
 #include "factor/pose_local_parameterization.h"
 #include "factor/projection_factor.h"
 #include "factor/projection_td_factor.h"
+#include "factor/SE3AbsolutatePoseFactor.h"
 #include <ceres/ceres.h>
 
 #include <opencv2/core/eigen.hpp>
@@ -158,6 +159,10 @@ public:
   Quaterniond relo_relative_q;
   double relo_relative_yaw;
 
+  // TODO: 增加开始optimazation的标志位
+  bool b_first_marginzation_old = false;
+  Transformd T_w_origin;
   // 增加视觉的voxel_map
   int64_t global_frame_cnt = 0;
+  Eigen::aligned_map<vins::TimeFrameId, Transformd> local_map_poses;
 };

@@ -115,7 +115,8 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time) {
     if (!forw_pts.empty()) {
 
       LOG(INFO) << "inverse optical flow";
-      LOG(INFO) << "forw_pts size: " << forw_pts.size() << "cur_pts: " << cur_pts.size();
+      LOG(INFO) << "forw_pts size: " << forw_pts.size()
+                << "cur_pts: " << cur_pts.size();
       cv::calcOpticalFlowPyrLK(
           forw_img, cur_img, forw_pts, cur_pts_inverse, status, err,
           cv::Size(31, 31), 3,
@@ -138,7 +139,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time) {
       reduceVector(cur_un_pts, status);
       reduceVector(track_cnt, status);
 
-//      rejectWithF();
+            rejectWithF();
     }
     //      calcOpticalFlowPyrLK(
     //          prev_pyramid_, curr_pyramid_, new_pts_, curr_pts, track_inliers,
@@ -155,7 +156,6 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time) {
 
   if (PUB_THIS_FRAME) {
     // TODO:
-    rejectWithF();
     ROS_DEBUG("set mask begins");
     TicToc t_m;
     setMask();
@@ -279,16 +279,36 @@ void FeatureTracker::showUndistortion(const string &name) {
 void FeatureTracker::undistortedPoints() {
   cur_un_pts.clear();
   cur_un_pts_map.clear();
-  // cv::undistortPoints(cur_pts, un_pts, K, cv::Mat());
-  for (unsigned int i = 0; i < cur_pts.size(); i++) {
-    Eigen::Vector2d a(cur_pts[i].x, cur_pts[i].y);
-    Eigen::Vector3d b;
-    m_camera->liftProjective(a, b);
-    cur_un_pts.push_back(cv::Point2f(b.x() / b.z(), b.y() / b.z()));
-    cur_un_pts_map.insert(
-        make_pair(ids[i], cv::Point2f(b.x() / b.z(), b.y() / b.z())));
-    // printf("cur pts id %d %f %f", ids[i], cur_un_pts[i].x, cur_un_pts[i].y);
+
+  //  cv::undistortPoints(pts_in, pts_out, K, distortion_coeffs,
+  //                      rectification_matrix, K_new);
+
+  const cv::Matx33d K(cam_intrinsics[0], 0.0, cam_intrinsics[2], 0.0,
+                      cam_intrinsics[1], cam_intrinsics[3], 0.0, 0.0, 1.0);
+  const cv::Matx33d K_new(1, 0.0, 0, 0.0, 1, 0, 0.0, 0.0, 1.0);
+
+  std::vector<cv::Point2f> un_pts(cur_pts.size());
+  if (cur_pts.size() > 0) {
+    cv::undistortPoints(cur_pts, un_pts, K, cam_distortion_coeffs,
+                        cv::Matx33d::eye(), K_new);
   }
+  for (size_t i = 0; i < cur_pts.size(); i++) {
+    cur_un_pts.push_back(un_pts[i]);
+    cur_un_pts_map.insert(make_pair(ids[i], un_pts[i]));
+  }
+
+  //  for (unsigned int i = 0; i < cur_pts.size(); i++) {
+  //    Eigen::Vector2d a(cur_pts[i].x, cur_pts[i].y);
+  //    Eigen::Vector3d b;
+  //
+  //    m_camera->liftProjective(a, b);
+  //    cur_un_pts.push_back(cv::Point2f(b.x() / b.z(), b.y() / b.z()));
+  //    cur_un_pts_map.insert(
+  //        make_pair(ids[i], cv::Point2f(b.x() / b.z(), b.y() / b.z())));
+  //    // printf("cur pts id %d %f %f", ids[i], cur_un_pts[i].x,
+  //    // cur_un_pts[i].y);
+  //  }
+
   // caculate points velocity
   if (!prev_un_pts_map.empty()) {
     double dt = cur_time - prev_time;

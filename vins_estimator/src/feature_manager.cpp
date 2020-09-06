@@ -72,6 +72,7 @@ bool FeatureManager::addFeatureCheckParallax(
       CHECK(frame_id != 0) << "frame_id == 0";
       KeyPointLandmarks[feature_id].obs[frame_id] = kpt_obs;
       KeyPointLandmarks[feature_id].kf_id = frame_id;
+      // TODO: 需要增加
       new_feature++;
     } else {
       KeyPointLandmarks[feature_id].obs[frame_id] = kpt_obs;
@@ -114,7 +115,7 @@ bool FeatureManager::addFeatureCheckParallax(
   }
 }
 
-//void FeatureManager::debugShow() {
+// void FeatureManager::debugShow() {
 //  ROS_DEBUG("debug show");
 //  for (auto &it : feature) {
 //    ROS_ASSERT(it.feature_per_frame.size() != 0);
@@ -153,54 +154,50 @@ FeatureManager::getCorresponding(int frame_count_l, int frame_count_r) {
   return corres;
 }
 
-void FeatureManager::invDepth2Depth()
-{
-  for (auto &landmark : KeyPointLandmarks)
-  {
+void FeatureManager::invDepth2Depth() {
+  for (auto &landmark : KeyPointLandmarks) {
     landmark.second.used_num = landmark.second.obs.size();
-    if (!(landmark.second.used_num >= 2 && time_frameid2_int_frameid_->at(landmark.second.kf_id) < WINDOW_SIZE - 2))
+    if (!(landmark.second.used_num >= 2 &&
+          time_frameid2_int_frameid_->at(landmark.second.kf_id) <
+              WINDOW_SIZE - 2))
       continue;
 
     landmark.second.estimated_depth = 1.0 / landmark.second.data[0];
-    //ROS_INFO("feature id %d , start_frame %d, depth %f ", it_per_id->feature_id, it_per_id-> start_frame, it_per_id->estimated_depth);
-    if (landmark.second.estimated_depth < 0)
-    {
+    // ROS_INFO("feature id %d , start_frame %d, depth %f ",
+    // it_per_id->feature_id, it_per_id-> start_frame,
+    // it_per_id->estimated_depth);
+    if (landmark.second.estimated_depth < 0) {
       landmark.second.solve_flag = KeyPointLandmark::SolveFlag::SOLVE_FAIL;
-    }
-    else
+    } else
       landmark.second.solve_flag = KeyPointLandmark::SolveFlag::SOLVE_SUCC;
   }
 }
-void FeatureManager::depth2InvDepth()
-{
-  for (auto &landmark : KeyPointLandmarks)
-  {
+void FeatureManager::depth2InvDepth() {
+  for (auto &landmark : KeyPointLandmarks) {
     landmark.second.used_num = landmark.second.obs.size();
-    if (!(landmark.second.used_num >= 2 && time_frameid2_int_frameid_->at(landmark.second.kf_id) < WINDOW_SIZE - 2))
+    if (!(landmark.second.used_num >= 2 &&
+          time_frameid2_int_frameid_->at(landmark.second.kf_id) <
+              WINDOW_SIZE - 2))
       continue;
     landmark.second.data[0] = 1. / landmark.second.estimated_depth;
   }
 }
 
-void FeatureManager::resetDepth()
-{
-  for (auto &landmark : KeyPointLandmarks)
-  {
+void FeatureManager::resetDepth() {
+  for (auto &landmark : KeyPointLandmarks) {
     landmark.second.used_num = landmark.second.obs.size();
-    if (!(landmark.second.used_num >= 2 && time_frameid2_int_frameid_->at(landmark.second.kf_id) < WINDOW_SIZE - 2))
+    if (!(landmark.second.used_num >= 2 &&
+          time_frameid2_int_frameid_->at(landmark.second.kf_id) <
+              WINDOW_SIZE - 2))
       continue;
     landmark.second.estimated_depth = -1.;
   }
 }
 
-
-
-void FeatureManager::removeFailures()
-{
-  for (auto iter = KeyPointLandmarks.begin(); iter != KeyPointLandmarks.end();)
-  {
-    if (iter->second.solve_flag == KeyPointLandmark::SolveFlag::SOLVE_FAIL)
-    {
+void FeatureManager::removeFailures() {
+  for (auto iter = KeyPointLandmarks.begin();
+       iter != KeyPointLandmarks.end();) {
+    if (iter->second.solve_flag == KeyPointLandmark::SolveFlag::SOLVE_FAIL) {
       iter = KeyPointLandmarks.erase(iter);
       continue;
     }
@@ -208,17 +205,18 @@ void FeatureManager::removeFailures()
   }
 }
 
+// https://blog.csdn.net/kokerf/article/details/72844455
+void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[],
+                                 Matrix3d ric[]) {
 
-
-//https://blog.csdn.net/kokerf/article/details/72844455
-void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
-{
-
-  for (auto &landmark : KeyPointLandmarks)
-  {
+  for (auto &landmark : KeyPointLandmarks) {
     landmark.second.used_num = landmark.second.obs.size();
-    if (!(landmark.second.used_num >= 2 && time_frameid2_int_frameid_->at(landmark.second.kf_id) < WINDOW_SIZE - 2))
+    if (!(landmark.second.used_num >= 4 &&
+          time_frameid2_int_frameid_->at(landmark.second.kf_id) <
+              WINDOW_SIZE - 2)) {
+      landmark.second.solve_flag = KeyPointLandmark::SolveFlag::NOT_TRIANGULATE;
       continue;
+    }
 
     if (landmark.second.estimated_depth > 0)
       continue;
@@ -237,12 +235,11 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
 
     Eigen::MatrixXd svd_A(2 * landmark.second.obs.size(), 4);
     int svd_idx = 0;
-    //P = [P1 P2 P3]^T
-    //AX=0      A = [A(2*i) A(2*i+1) A(2*i+2) A(2*i+3) ...]^T
-    //A(2*i)   = x(i) * P3 - z(i) * P1
-    //A(2*i+1) = y(i) * P3 - z(i) * P2
-    for (const auto &it_per_frame : landmark.second.obs)
-    {
+    // P = [P1 P2 P3]^T
+    // AX=0      A = [A(2*i) A(2*i+1) A(2*i+2) A(2*i+3) ...]^T
+    // A(2*i)   = x(i) * P3 - z(i) * P1
+    // A(2*i+1) = y(i) * P3 - z(i) * P2
+    for (const auto &it_per_frame : landmark.second.obs) {
 
       auto target_tid = it_per_frame.first;
       auto target_id = time_frameid2_int_frameid_->at(target_tid);
@@ -260,35 +257,60 @@ void FeatureManager::triangulate(Vector3d Ps[], Vector3d tic[], Matrix3d ric[])
     }
     //对A的SVD分解得到其最小奇异值对应的单位奇异向量(x,y,z,w)，深度为z/w
     ROS_ASSERT(svd_idx == svd_A.rows());
-    Eigen::Vector4d
-        svd_V = Eigen::JacobiSVD<Eigen::MatrixXd>(svd_A, Eigen::ComputeThinV).matrixV().rightCols<1>();
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(svd_A, Eigen::ComputeThinU |
+                                                     Eigen::ComputeThinV);
+
+    auto svd_V = svd.matrixV().rightCols<1>();
+
+    Eigen::MatrixXd singularValues;
+    singularValues.resize(svd.singularValues().rows(), 1);
+    singularValues = svd.singularValues();
+
+    double condA =
+        singularValues(0, 0) / singularValues(singularValues.rows() - 1, 0);
+
     double svd_method = svd_V[2] / svd_V[3];
-    //it_per_id->estimated_depth = -b / A;
-    //it_per_id->estimated_depth = svd_V[2] / svd_V[3];
+    // If we have a bad condition number, or it is too close
+    // Then set the flag for bad (i.e. set z-axis to nan)
+    if (std::abs(condA) > 1000 ||
+        svd_method < 0.1 || svd_method > 40){
+      landmark.second.solve_flag = KeyPointLandmark::SolveFlag::SOLVE_FAIL;
+    }
+
+
+    // it_per_id->estimated_depth = -b / A;
+    // it_per_id->estimated_depth = svd_V[2] / svd_V[3];
 
     landmark.second.estimated_depth = svd_method;
-    //it_per_id->estimated_depth = INIT_DEPTH;
+    // it_per_id->estimated_depth = INIT_DEPTH;
 
-    //0 initial; 1 by depth image; 2 by triangulate
-    if (landmark.second.estimated_depth < 0.1)
-    {
+
+
+    // 0 initial; 1 by depth image; 2 by triangulate
+    if (landmark.second.estimated_depth < 0.1) {
+      landmark.second.solve_flag = KeyPointLandmark::SolveFlag::NOT_TRIANGULATE;
       landmark.second.estimated_depth = INIT_DEPTH;
+    } else {
+      landmark.second.solve_flag =
+          KeyPointLandmark::SolveFlag::TRIANGULATE_SUCESS;
+    }
+    if (landmark.second.estimated_depth < 0) {
+      landmark.second.solve_flag = KeyPointLandmark::SolveFlag::SOLVE_FAIL;
     }
   }
-} //triangulate
+} // triangulate
 
-void FeatureManager::removeOneFrameObservation(vins::TimeFrameId marg_frame_tid)
-{
-  //LOG(INFO) << "marg_frame_tid: " << marg_frame_tid;
-  for (auto iter = KeyPointLandmarks.begin(); iter != KeyPointLandmarks.end();)
-  {
+void FeatureManager::removeOneFrameObservation(
+    vins::TimeFrameId marg_frame_tid) {
+  // LOG(INFO) << "marg_frame_tid: " << marg_frame_tid;
+  for (auto iter = KeyPointLandmarks.begin();
+       iter != KeyPointLandmarks.end();) {
     auto &obs = iter->second.obs;
-    if (obs.find(marg_frame_tid) != obs.end())
-    {
+    if (obs.find(marg_frame_tid) != obs.end()) {
 
       obs.erase(marg_frame_tid);
-      if (obs.empty())
-      {
+      if (obs.empty()) {
         iter = KeyPointLandmarks.erase(iter);
         continue;
       }
@@ -299,11 +321,10 @@ void FeatureManager::removeOneFrameObservation(vins::TimeFrameId marg_frame_tid)
   }
 }
 
-void FeatureManager::removeOneFrameObservationAndShiftDepth(vins::TimeFrameId marg_frame_tid,
-                                                            Vector3d Ps[],
-                                                            Vector3d tic[], Matrix3d ric[])
-{
-  //LOG(INFO) << "marg_frame_tid: " << std::to_string(marg_frame_tid);
+void FeatureManager::removeOneFrameObservationAndShiftDepth(
+    vins::TimeFrameId marg_frame_tid, Vector3d Ps[], Vector3d tic[],
+    Matrix3d ric[]) {
+  // LOG(INFO) << "marg_frame_tid: " << std::to_string(marg_frame_tid);
 
   auto oldhost_tid = marg_frame_tid;
   int oldhost_id = time_frameid2_int_frameid_->at(oldhost_tid);
@@ -312,25 +333,24 @@ void FeatureManager::removeOneFrameObservationAndShiftDepth(vins::TimeFrameId ma
   Transformd T_c_i = T_i_c.inverse();
   Transformd T_w_oldhost_i(Rs[oldhost_id], Ps[oldhost_id]);
 
-  for (auto iter = KeyPointLandmarks.begin(); iter != KeyPointLandmarks.end();)
-  {
+  for (auto iter = KeyPointLandmarks.begin();
+       iter != KeyPointLandmarks.end();) {
     auto &obs = iter->second.obs;
-    if (obs.find(marg_frame_tid) != obs.end())
-    {
+    if (obs.find(marg_frame_tid) != obs.end()) {
 
       CHECK(iter->second.obs.begin()->first == marg_frame_tid) << "ERROR";
-      Eigen::Vector3d normalized_point = iter->second.obs.begin()->second.normalpoint;
-      Eigen::Vector3d pts_oldhost = normalized_point * iter->second.estimated_depth;
+      Eigen::Vector3d normalized_point =
+          iter->second.obs.begin()->second.normalpoint;
+      Eigen::Vector3d pts_oldhost =
+          normalized_point * iter->second.estimated_depth;
 
       obs.erase(marg_frame_tid);
-      if (obs.empty())
-      {
+      if (obs.empty()) {
         iter = KeyPointLandmarks.erase(iter);
         continue;
       }
       //如果3D点的第一个观测帧和记录的主导帧不一样了，那么需要更新3D点的主导帧
-      if (iter->second.kf_id != obs.begin()->first)
-      {
+      if (iter->second.kf_id != obs.begin()->first) {
 
         iter->second.kf_id = obs.begin()->first; // update 3d点host frame id
 
@@ -339,7 +359,8 @@ void FeatureManager::removeOneFrameObservationAndShiftDepth(vins::TimeFrameId ma
         int newhost_id = time_frameid2_int_frameid_->at(newhost_tid);
 
         Transformd T_w_newhost_i(Rs[newhost_id], Ps[newhost_id]);
-        Transformd T_newhost_c_oldhost_c = T_c_i * T_w_newhost_i.inverse() * T_w_oldhost_i * T_i_c;
+        Transformd T_newhost_c_oldhost_c =
+            T_c_i * T_w_newhost_i.inverse() * T_w_oldhost_i * T_i_c;
 
         Eigen::Vector3d pts_newhost = T_newhost_c_oldhost_c * pts_oldhost;
         double newdepth = pts_newhost(2);
@@ -352,8 +373,6 @@ void FeatureManager::removeOneFrameObservationAndShiftDepth(vins::TimeFrameId ma
     ++iter;
   }
 } // function removeOneFrameObservationAndShiftDepth
-
-
 
 double FeatureManager::compensatedParallax2(const KeyPointLandmark &it_per_id,
                                             int frame_count) {
